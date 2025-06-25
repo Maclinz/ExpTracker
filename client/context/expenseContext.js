@@ -22,6 +22,11 @@ export const ExpenseContextProvider = ({ children }) => {
   const [expenses, setExpenses] = useState([]);
   const [loadingIncomes, setLoadingIncomes] = useState(false);
   const [loadingExpenses, setLoadingExpenses] = useState(false);
+  const [monthlyIncomeTotals, setMonthlyIncomeTotals] = useState([]);
+  const [dailyExpense, setDailyExpense] = useState([]);
+  const [totalIncomes, setTotalIncomes] = useState(0);
+  const [totalExpenses, setTotalExpenses] = useState(0);
+  const [balance, setBalance] = useState(0);
 
   const [textInput, setTextInput] = useState({
     title: "",
@@ -45,6 +50,16 @@ export const ExpenseContextProvider = ({ children }) => {
     }
   };
 
+  const fetchTotalIncomes = async () => {
+    try {
+      const res = await axios.get(`${baseUrl}/incomes/total`);
+
+      setTotalIncomes(res.data.total);
+    } catch (error) {
+      console.log("Error fetching total incomes:", error);
+    }
+  };
+
   // get expenses
   const getExpenses = async () => {
     setLoadingExpenses(true);
@@ -56,6 +71,15 @@ export const ExpenseContextProvider = ({ children }) => {
       console.log("Error fetching incomes:", error);
     } finally {
       setLoadingExpenses(false);
+    }
+  };
+
+  const fetchTotalExpenses = async () => {
+    try {
+      const res = await axios.get(`${baseUrl}/expenses/total`);
+      setTotalExpenses(res.data.total);
+    } catch (error) {
+      console.log("Error fetching total expenses:", error);
     }
   };
 
@@ -130,6 +154,99 @@ export const ExpenseContextProvider = ({ children }) => {
     }
   };
 
+  // calculate total incomes for thw past 6 months
+  const calculateMonthlyIncomeTotals = () => {
+    const months = [
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
+    ];
+
+    const currentDate = new Date();
+    const monthlyTotals = [];
+
+    for (let i = 5; i >= 0; i--) {
+      // figure out the correct month and year
+      const date = new Date(
+        currentDate.getFullYear(),
+        currentDate.getMonth() - i,
+        1
+      );
+
+      monthlyTotals.push({
+        month: months[date.getMonth()],
+        year: date.getFullYear(),
+        total: 0,
+      });
+    }
+
+    // aggregate incomes for the month --> last 6 months
+    incomes.forEach((income) => {
+      const incomeDate = new Date(income.date);
+      const diffInMonths =
+        (currentDate.getFullYear() - incomeDate.getFullYear()) * 12 +
+        (currentDate.getMonth() - incomeDate.getMonth());
+
+      // check if the income date is within the last 6 months
+      if (diffInMonths >= 0 && diffInMonths <= 5) {
+        const monthIndex = 5 - diffInMonths;
+        monthlyTotals[monthIndex].total += income.amount;
+      }
+    });
+
+    setMonthlyIncomeTotals(monthlyTotals);
+  };
+
+  // claculate dail balance --> 7 days
+  const calculateDailyExpense = () => {
+    const currentDate = new Date();
+    const dailyExpenses = [];
+
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(
+        currentDate.getFullYear(),
+        currentDate.getMonth(),
+        currentDate.getDate() - i
+      );
+
+      dailyExpenses.push({
+        date: date.toLocaleDateString("en-US", {
+          weekday: "short",
+        }),
+        balance: 0,
+      });
+    }
+
+    // aggregate expenses for the last 7 days
+    expenses.forEach((expense) => {
+      if (expense.type !== "expense") return;
+
+      const expenseDate = new Date(expense.date);
+
+      // check if the expense date is within the last 7 days
+      const diffInDays =
+        (currentDate.getFullYear() - expenseDate.getFullYear()) * 365 +
+        (currentDate.getMonth() - expenseDate.getMonth()) * 30 +
+        (currentDate.getDate() - expenseDate.getDate());
+
+      if (diffInDays >= 0 && diffInDays < 7) {
+        const index = diffInDays;
+        dailyExpenses[index].balance += expense.amount;
+      }
+    });
+
+    setDailyExpense(dailyExpenses.reverse());
+  };
+
   // handle input change
   const inputChange = (name) => (e) => {
     setTextInput({ ...textInput, [name]: e.target.value });
@@ -140,12 +257,29 @@ export const ExpenseContextProvider = ({ children }) => {
   useEffect(() => {
     const fetchData = async () => {
       if (userId) {
-        await Promise.all([getIncomes(), getExpenses()]);
+        await Promise.all([
+          getIncomes(),
+          getExpenses(),
+          fetchTotalIncomes(),
+          fetchTotalExpenses(),
+        ]);
       }
     };
 
     fetchData();
   }, [userId]);
+
+  useEffect(() => {
+    if (incomes.length > 0) {
+      calculateMonthlyIncomeTotals();
+    }
+
+    if (expenses.length > 0) {
+      calculateDailyExpense();
+    }
+
+    setBalance(totalIncomes - totalExpenses);
+  }, [incomes, expenses]);
 
   return (
     <ExpenseContext.Provider
@@ -160,6 +294,11 @@ export const ExpenseContextProvider = ({ children }) => {
         deleteExpense,
         textInput,
         handleInputChange,
+        monthlyIncomeTotals,
+        dailyExpense,
+        totalIncomes,
+        totalExpenses,
+        balance,
       }}
     >
       {children}
